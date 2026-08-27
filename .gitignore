@@ -11,3 +11,8 @@ next-env.d.ts
 
 # Lixo do Finder
 .DS_Store
+
+# Segredos do Portainer. Existe só para o modo "Repository", que nao usamos
+# justamente porque ele exigiria commitar chaves. Ignorado como rede de
+# seguranca, caso alguem crie o arquivo por engano.
+stack.env

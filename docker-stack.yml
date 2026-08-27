@@ -1,60 +1,134 @@
-# Stack de produção — Docker Swarm, atrás do Traefik.
+# Stack do IDPRO para o Docker Swarm.
 #
-# Cole no Portainer em Stacks → Add stack e preencha as variáveis de ambiente
-# lá mesmo. Depois de cada push na main, use "Update the stack" com
-# "Re-pull image" marcado.
-version: "3.8"
+# Cole no Portainer (Stacks → Add stack → Web editor) e preencha as variáveis
+# no campo "Environment variables" da própria tela — assim os segredos não
+# ficam no Git.
+#
+# Segue o mesmo padrão das stacks que já rodam aqui (planejamentos-sw, n8n,
+# Chatwoot): mesma rede externa, mesmo certresolver, labels dentro de `deploy`,
+# réplica presa ao nó manager.
+#
+# Domínio: idpro.samuelfreire.com.br -> mesmo servidor das outras stacks.
+# O registro A precisa apontar direto para o IP, sem proxy do Cloudflare, que é
+# o necessário para o Let's Encrypt validar pelo desafio HTTP.
+
+version: "3.7"
 
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - idpro-postgres:/var/lib/postgresql/data
-    networks:
-      - interna
-    deploy:
-      replicas: 1
-      restart_policy:
-        condition: any
-
   app:
-    image: ghcr.io/${GITHUB_OWNER}/idpro:latest
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
-      AUTH_SECRET: ${AUTH_SECRET}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
-      ADMIN_EMAIL: ${ADMIN_EMAIL}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      ADMIN_NAME: ${ADMIN_NAME}
-      NODE_ENV: production
+    image: ${APP_IMAGE:-ghcr.io/samuelfreirebr/idpro:latest}
+
     networks:
+      - SamuelFreire_RedeInterna
       - interna
-      - traefik-public
+
+    environment:
+      - NODE_ENV=production
+      - TZ=America/Sao_Paulo
+      # O servidor do Next lê HOSTNAME para escolher em qual endereço escutar.
+      # O Docker preenche essa variável sozinho com o nome do container, e aí o
+      # Next escuta em UM só dos IPs. Como o serviço está em duas redes, o
+      # Traefik chega pela outra e recebe recusa de conexão — o clássico 502.
+      # Definir aqui vence a variável automática do Docker.
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+      # Montado a partir das variáveis do banco: um campo a menos para
+      # preencher, e sem risco de a senha divergir entre os dois serviços.
+      # A senha não deve conter @ : / — são separadores dentro da URL.
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-idpro}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-idpro}?schema=public
+      - AUTH_SECRET=${AUTH_SECRET}
+      - PUBLIC_BASE_URL=https://${APP_DOMAIN:-idpro.samuelfreire.com.br}
+      # Vazia = geração desligada. O app sobe, o briefing funciona, e só o botão
+      # de gerar avisa que falta a chave.
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      # Usuário do primeiro acesso. Criado no start do container; trocar a senha
+      # aqui e atualizar a stack também serve para recuperar o acesso.
+      - ADMIN_EMAIL=${ADMIN_EMAIL}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - ADMIN_NAME=${ADMIN_NAME:-Administrador}
+
     deploy:
-      # Uma réplica só, de propósito: as migrações rodam no entrypoint e duas
-      # réplicas subindo juntas as aplicariam em paralelo.
+      mode: replicated
+      # Uma réplica: as migrações rodam no entrypoint, e duas subindo juntas as
+      # aplicariam em paralelo.
       replicas: 1
+
+      placement:
+        constraints:
+          - node.role == manager
+
+      update_config:
+        order: start-first
+        failure_action: rollback
+
       restart_policy:
         condition: any
+        delay: 5s
+
+      resources:
+        limits:
+          # Sem Chromium aqui — o IDPRO não gera PDF. Só Node e Next.
+          cpus: "1.0"
+          memory: 1024M
+
       labels:
         - traefik.enable=true
-        - traefik.docker.network=traefik-public
-        - traefik.http.routers.idpro.rule=Host(`idpro.samuelfreire.com.br`)
+        # A aplicação está em duas redes; sem esta label o Traefik pode tentar
+        # alcançá-la pela rede errada.
+        - traefik.docker.network=SamuelFreire_RedeInterna
+        - traefik.http.routers.idpro.rule=Host(`${APP_DOMAIN:-idpro.samuelfreire.com.br}`)
         - traefik.http.routers.idpro.entrypoints=websecure
-        - traefik.http.routers.idpro.tls=true
-        - traefik.http.routers.idpro.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.idpro.priority=1
+        - traefik.http.routers.idpro.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencryptresolver}
+        - traefik.http.routers.idpro.service=idpro
         - traefik.http.services.idpro.loadbalancer.server.port=3000
+        - traefik.http.services.idpro.loadbalancer.passHostHeader=1
+
+  db:
+    image: postgres:16-alpine
+
+    # Fora da rede do Traefik de propósito: só a aplicação precisa alcançar o
+    # banco, e nenhum outro app do servidor deveria enxergá-lo.
+    networks:
+      - interna
+
+    volumes:
+      - idpro_db:/var/lib/postgresql/data
+
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-idpro}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB:-idpro}
+      - TZ=America/Sao_Paulo
+
+    deploy:
+      mode: replicated
+      replicas: 1
+
+      # O volume é local ao nó. Sem esta trava, o banco poderia subir em outro
+      # nó e encontrar um volume vazio.
+      placement:
+        constraints:
+          - node.role == manager
+
+      update_config:
+        order: stop-first
+        failure_action: rollback
+
+      restart_policy:
+        condition: any
+        delay: 5s
 
 volumes:
-  idpro-postgres:
+  idpro_db:
+    external: false
 
 networks:
+  SamuelFreire_RedeInterna:
+    name: SamuelFreire_RedeInterna
+    external: true
+
+  # Rede privada da stack, criada automaticamente. Só app e banco a usam.
   interna:
     driver: overlay
-  traefik-public:
-    external: true

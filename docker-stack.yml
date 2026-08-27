@@ -1,0 +1,60 @@
+# Stack de produção — Docker Swarm, atrás do Traefik.
+#
+# Cole no Portainer em Stacks → Add stack e preencha as variáveis de ambiente
+# lá mesmo. Depois de cada push na main, use "Update the stack" com
+# "Re-pull image" marcado.
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - idpro-postgres:/var/lib/postgresql/data
+    networks:
+      - interna
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  app:
+    image: ghcr.io/${GITHUB_OWNER}/idpro:latest
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public
+      AUTH_SECRET: ${AUTH_SECRET}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_NAME: ${ADMIN_NAME}
+      NODE_ENV: production
+    networks:
+      - interna
+      - traefik-public
+    deploy:
+      # Uma réplica só, de propósito: as migrações rodam no entrypoint e duas
+      # réplicas subindo juntas as aplicariam em paralelo.
+      replicas: 1
+      restart_policy:
+        condition: any
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=traefik-public
+        - traefik.http.routers.idpro.rule=Host(`idpro.samuelfreire.com.br`)
+        - traefik.http.routers.idpro.entrypoints=websecure
+        - traefik.http.routers.idpro.tls=true
+        - traefik.http.routers.idpro.tls.certresolver=letsencryptresolver
+        - traefik.http.services.idpro.loadbalancer.server.port=3000
+
+volumes:
+  idpro-postgres:
+
+networks:
+  interna:
+    driver: overlay
+  traefik-public:
+    external: true

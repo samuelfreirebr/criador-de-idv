@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+.env
+.env.local
+*.tsbuildinfo
+next-env.d.ts
+
+# Banco de desenvolvimento local (binários e dados descartáveis)
+.banco-local/
+
+# Lixo do Finder
+.DS_Store

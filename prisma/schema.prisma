@@ -1,0 +1,163 @@
+// Schema do IDPRO.
+//
+// Regra central, herdada da arquitetura de referência: o conteúdo preenchido
+// pelo usuário vive em colunas JSON. Criar um bloco novo no briefing — ou
+// acrescentar um campo a um bloco existente — NUNCA exige migração de banco.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@map("users")
+}
+
+/// O agregado: uma marca a ser criada, do briefing até os prompts.
+model Projeto {
+  id        String   @id @default(cuid())
+  /// Nome da marca. Fica em coluna própria porque é o rótulo da lista e o
+  /// título de tudo — ler um bloco só para descobrir o nome do projeto seria
+  /// caro e obrigaria a listagem a conhecer o formato do briefing.
+  nome      String
+  /// "rascunho" enquanto o briefing está sendo montado, "gerando" durante uma
+  /// chamada à IA, "pronto" depois que existe pelo menos um prompt.
+  status    String   @default("rascunho")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  blocos  Bloco[]
+  rodadas Rodada[]
+  ideias  Ideia[]
+
+  @@index([updatedAt])
+  @@map("projetos")
+}
+
+/// A unidade que compõe o agregado: uma seção do briefing.
+///
+/// Diferente do sistema de referência, blocos não são criados nem arrastados
+/// pelo usuário — todo projeto tem todos os blocos registrados, na ordem que a
+/// própria pasta declara. Por isso a chave é (projeto, tipo) e não há coluna
+/// de posição: a ordem mora no registro, não no banco.
+model Bloco {
+  id        String @id @default(cuid())
+  projetoId String
+  /// Id do bloco registrado em src/blocos/<Pasta>/index.ts
+  tipo      String
+  /// Conteúdo preenchido, no formato definido pelos campos do bloco.
+  data      Json   @default("{}")
+
+  projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+
+  @@unique([projetoId, tipo])
+  @@index([projetoId])
+  @@map("blocos")
+}
+
+/// Uma chamada de geração de ideias.
+///
+/// As rodadas ficam empilhadas: a próxima recebe tudo o que já saiu e o
+/// veredito de cada ideia. É isto que substitui a conversa infinita do
+/// ChatGPT — o contexto enviado é sempre montado do banco, com tamanho
+/// controlado, em vez de arrastar o histórico inteiro.
+model Rodada {
+  id         String   @id @default(cuid())
+  projetoId  String
+  /// 1, 2, 3… dentro do projeto. Exibido como "Rodada 2".
+  numero     Int
+  quantidade Int
+  /// Ajuste livre digitado antes de gerar ("mais geométrico", "esquece a
+  /// ideia do triângulo"). Vazio na maioria das rodadas.
+  instrucao  String   @default("")
+  createdAt  DateTime @default(now())
+
+  projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  ideias  Ideia[]
+
+  @@unique([projetoId, numero])
+  @@index([projetoId, numero])
+  @@map("rodadas")
+}
+
+/// Um card de ideia devolvido pela IA.
+model Ideia {
+  id        String @id @default(cuid())
+  rodadaId  String
+  /// Denormalizado de propósito: montar o histórico da próxima rodada é uma
+  /// leitura por projeto, e passar pela rodada em toda consulta não paga.
+  projetoId String
+  ordem     Int
+  /// Campos do card, no formato de `IdeiaSchema` (src/lib/ideia.ts) — o mesmo
+  /// schema que descreve a resposta exigida da IA.
+  data      Json   @default("{}")
+  /// "neutro" | "amei" | "descartei" — o que alimenta a rodada seguinte.
+  veredito  String @default("neutro")
+  /// Comentário livre sobre esta ideia, também enviado na próxima rodada.
+  comentario String @default("")
+  createdAt DateTime @default(now())
+
+  rodada  Rodada  @relation(fields: [rodadaId], references: [id], onDelete: Cascade)
+  projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  prompt  Prompt?
+
+  @@index([rodadaId, ordem])
+  @@index([projetoId])
+  @@map("ideias")
+}
+
+/// O prompt completo gerado a partir de uma ideia selecionada.
+model Prompt {
+  id        String   @id @default(cuid())
+  ideiaId   String   @unique
+  titulo    String
+  /// O prompt em português — o que aparece na tela.
+  texto     String
+  /// Versão em inglês, estruturada em JSON, gerada sob demanda pelo botão.
+  /// Nula até alguém pedir a conversão.
+  json      Json?
+  /// Ajuste pedido na última refação ("troque só a cor para verde escuro").
+  /// Fica guardado para o texto continuar explicando por que saiu assim.
+  ajuste    String   @default("")
+  /// Fotografia do briefing inteiro no instante em que este prompt nasceu:
+  /// [{ tipo, data }] de todos os blocos.
+  ///
+  /// Existe porque o briefing é editado o tempo todo, e um prompt bom escrito
+  /// há três dias não tem como ser reproduzido depois que as barras mudaram.
+  /// Guardar a configuração junto do resultado é o que permite voltar a ela.
+  configuracao Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ideia Ideia @relation(fields: [ideiaId], references: [id], onDelete: Cascade)
+
+  @@map("prompts")
+}
+
+/// Referências visuais enviadas pelo usuário.
+///
+/// Ficam no banco, e não em disco, pelo mesmo motivo do sistema de referência:
+/// em Docker Swarm a aplicação pode ter mais de uma réplica e um volume local
+/// não seria compartilhado. Aqui a leitura também exige sessão — ao contrário
+/// do outro app, não há Chromium anônimo precisando abrir as imagens.
+model Asset {
+  id        String   @id @default(cuid())
+  mime      String
+  size      Int
+  largura   Int      @default(0)
+  altura    Int      @default(0)
+  data      Bytes
+  createdAt DateTime @default(now())
+
+  @@map("assets")
+}

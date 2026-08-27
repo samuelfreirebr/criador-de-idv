@@ -1,0 +1,48 @@
+{
+  "name": "idpro",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "blocos:sync": "node scripts/sync-blocos.mjs",
+    "predev": "npm run blocos:sync",
+    "dev": "next dev",
+    "prebuild": "npm run blocos:sync && prisma generate",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "banco:iniciar": "node scripts/banco-local.mjs iniciar",
+    "banco:parar": "node scripts/banco-local.mjs parar",
+    "banco:status": "node scripts/banco-local.mjs status"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1",
+    "bcryptjs": "^2.4.3",
+    "clsx": "^2.1.1",
+    "jose": "^5.9.6",
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "embedded-postgres": "^18.4.0-beta.17",
+    "prisma": "^6.2.1",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.3"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "prisma@6.19.3": true,
+    "@embedded-postgres/darwin-arm64@18.4.0-beta.17": true
+  }
+}

@@ -2,6 +2,14 @@
 
 App IDPRO isolado: gera ideias e prompts de identidade visual a partir do briefing de uma marca. Next.js + Prisma + Docker. Existe uma cópia independente dentro de `../HUB-DE-LANCAMENTOS`.
 
+## Onde ficam as coisas
+
+- **Projeto no Mac:** `~/Documents/PROJETOS/criador-de-idv` (fora do Google Drive; o Drive sincronizando o `.git` corrompe o repositório).
+- **GitHub:** https://github.com/samuelfreirebr/criador-de-idv
+- **Privados (fora do GitHub):** `Meu Drive/ARQUIVOS-PRIVADOS/CRIADOR-DE-IDV`, pelo atalho `_PRIVADOS/` nesta pasta.
+- **Senhas:** `.env` / `.env.local` ficam só aqui e no cofre de senhas. Nunca no Drive nem no GitHub.
+- A pasta antiga do Drive foi arquivada em `Meu Drive/90-ARQUIVO/CRIADOR-DE-IDV-ANTIGO-2026-11-07`.
+
 ## Contexto e documentação principal
 
 Ler o que for relevante para a tarefa antes de executar:
